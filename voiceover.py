@@ -1,8 +1,8 @@
 import streamlit as st
 import time
 import io
-import struct
 import wave
+import array
 from google import genai
 from google.genai import types
 
@@ -18,7 +18,6 @@ def get_keys():
     return keys
 
 def change_speed_pcm(raw_pcm, speed):
-    import array
     samples = array.array('h', raw_pcm)
     if speed == 1.0:
         return bytes(samples)
@@ -30,17 +29,16 @@ def change_speed_pcm(raw_pcm, speed):
             new_samples.append(samples[src_idx])
     return bytes(new_samples)
 
-def pcm_to_mp3_bytes(pcm_data, sample_rate=24000):
-    """Convert PCM to MP3 using lameenc"""
+def pcm_to_mp3(pcm_data, sample_rate=24000):
     import lameenc
     encoder = lameenc.Encoder()
     encoder.set_bit_rate(128)
     encoder.set_in_sample_rate(sample_rate)
     encoder.set_channels(1)
     encoder.set_quality(2)
-    mp3_data = encoder.encode(pcm_data)
-    mp3_data += encoder.flush()
-    return mp3_data
+    mp3 = encoder.encode(pcm_data)
+    mp3 += encoder.flush()
+    return bytes(mp3)  # pastikan return bytes murni
 
 def process_tts(text, voice_name, speed_value):
     KEYS = get_keys()
@@ -71,15 +69,16 @@ def process_tts(text, voice_name, speed_value):
                 )
             )
             raw_pcm = response.candidates[0].content.parts[0].inline_data.data
-            status_placeholder.info("🛠️ Mengatur tempo & convert ke MP3...")
+            status_placeholder.info("🛠️ Convert ke MP3...")
             progress_bar.progress(80)
             adjusted_pcm = change_speed_pcm(raw_pcm, speed_value)
-            mp3_bytes = pcm_to_mp3_bytes(adjusted_pcm)
+            mp3_bytes = pcm_to_mp3(adjusted_pcm)
+            buf = io.BytesIO(mp3_bytes)
             progress_bar.progress(100)
             status_placeholder.success("✨ Selesai!")
             time.sleep(1)
             status_placeholder.empty()
-            return mp3_bytes
+            return buf
         except Exception as e:
             if "429" in str(e) or "quota" in str(e).lower():
                 st.warning(f"⚠️ Key #{i+1} Limit. Mencoba Key berikutnya...")
@@ -108,11 +107,11 @@ with col2:
     text_area = st.text_area("Masukkan teks narasi:", height=300, placeholder="Tempel naskah di sini...")
     if st.button("🚀 Generate Voiceover Now", use_container_width=True):
         if text_area.strip():
-            mp3_bytes = process_tts(text_area, voice_choice, speed_value=selected_speed)
-            if mp3_bytes:
+            buf = process_tts(text_area, voice_choice, speed_value=selected_speed)
+            if buf:
                 st.divider()
-                st.audio(mp3_bytes, format="audio/mp3")
-                st.download_button("📥 Download MP3", mp3_bytes, file_name=file_name, mime="audio/mpeg", use_container_width=True)
+                st.audio(buf, format="audio/mpeg")
+                st.download_button("📥 Download MP3", buf, file_name=file_name, mime="audio/mpeg", use_container_width=True)
         else:
             st.warning("Silakan masukkan teks terlebih dahulu.")
 
