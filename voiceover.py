@@ -1,5 +1,4 @@
 import streamlit as st
-import os
 import time
 import io
 import wave
@@ -7,7 +6,6 @@ import array
 from google import genai
 from google.genai import types
 
-# Ambil API Keys dari Streamlit Secrets
 def get_keys():
     keys = []
     for k in ["GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3", "GEMINI_API_KEY_4"]:
@@ -22,7 +20,7 @@ def get_keys():
 def change_speed_pcm(raw_pcm, speed):
     samples = array.array('h', raw_pcm)
     if speed == 1.0:
-        return raw_pcm
+        return bytes(samples)
     new_length = int(len(samples) / speed)
     new_samples = array.array('h')
     for i in range(new_length):
@@ -46,7 +44,7 @@ def process_tts(text, voice_name, speed_value):
     progress_bar = st.progress(0)
 
     if not KEYS:
-        st.error("🚨 API Key tidak ditemukan!")
+        st.error("🚨 API Key tidak ditemukan! Isi di Streamlit Secrets.")
         return None
 
     for i, key in enumerate(KEYS):
@@ -110,7 +108,7 @@ with col2:
             if wav_bytes:
                 st.divider()
                 st.audio(wav_bytes, format="audio/wav")
-                st.download_button("📥 Download WAV", wav_bytes, file_name=file_name, mime="audio/wav", use_container_width=True)
+                st.download_button("📥 Download Audio", wav_bytes, file_name=file_name, mime="audio/wav", use_container_width=True)
         else:
             st.warning("Silakan masukkan teks terlebih dahulu.")
 
