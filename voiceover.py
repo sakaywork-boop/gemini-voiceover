@@ -1,8 +1,8 @@
 import streamlit as st
 import time
 import io
+import struct
 import wave
-import array
 from google import genai
 from google.genai import types
 
@@ -18,6 +18,7 @@ def get_keys():
     return keys
 
 def change_speed_pcm(raw_pcm, speed):
+    import array
     samples = array.array('h', raw_pcm)
     if speed == 1.0:
         return bytes(samples)
@@ -29,14 +30,17 @@ def change_speed_pcm(raw_pcm, speed):
             new_samples.append(samples[src_idx])
     return bytes(new_samples)
 
-def pcm_to_wav_bytes(pcm_data, sample_rate=24000):
-    buf = io.BytesIO()
-    with wave.open(buf, 'wb') as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(pcm_data)
-    return buf.getvalue()
+def pcm_to_mp3_bytes(pcm_data, sample_rate=24000):
+    """Convert PCM to MP3 using lameenc"""
+    import lameenc
+    encoder = lameenc.Encoder()
+    encoder.set_bit_rate(128)
+    encoder.set_in_sample_rate(sample_rate)
+    encoder.set_channels(1)
+    encoder.set_quality(2)
+    mp3_data = encoder.encode(pcm_data)
+    mp3_data += encoder.flush()
+    return mp3_data
 
 def process_tts(text, voice_name, speed_value):
     KEYS = get_keys()
@@ -44,7 +48,7 @@ def process_tts(text, voice_name, speed_value):
     progress_bar = st.progress(0)
 
     if not KEYS:
-        st.error("🚨 API Key tidak ditemukan! Isi di Streamlit Secrets.")
+        st.error("🚨 API Key tidak ditemukan!")
         return None
 
     for i, key in enumerate(KEYS):
@@ -67,15 +71,15 @@ def process_tts(text, voice_name, speed_value):
                 )
             )
             raw_pcm = response.candidates[0].content.parts[0].inline_data.data
-            status_placeholder.info("🛠️ Mengatur tempo audio...")
+            status_placeholder.info("🛠️ Mengatur tempo & convert ke MP3...")
             progress_bar.progress(80)
             adjusted_pcm = change_speed_pcm(raw_pcm, speed_value)
-            wav_bytes = pcm_to_wav_bytes(adjusted_pcm)
+            mp3_bytes = pcm_to_mp3_bytes(adjusted_pcm)
             progress_bar.progress(100)
             status_placeholder.success("✨ Selesai!")
             time.sleep(1)
             status_placeholder.empty()
-            return wav_bytes
+            return mp3_bytes
         except Exception as e:
             if "429" in str(e) or "quota" in str(e).lower():
                 st.warning(f"⚠️ Key #{i+1} Limit. Mencoba Key berikutnya...")
@@ -97,18 +101,18 @@ with col1:
     speed_label = st.radio("Kecepatan Bicara:", ["Pelan (Santai)", "Normal", "Cepat"], index=1)
     speed_map = {"Pelan (Santai)": 0.85, "Normal": 1.0, "Cepat": 1.15}
     selected_speed = speed_map[speed_label]
-    file_name = st.text_input("Nama File Output", "hasil_suara.wav")
+    file_name = st.text_input("Nama File Output", "hasil_suara.mp3")
 
 with col2:
     st.subheader("📝 Konten Teks")
     text_area = st.text_area("Masukkan teks narasi:", height=300, placeholder="Tempel naskah di sini...")
     if st.button("🚀 Generate Voiceover Now", use_container_width=True):
         if text_area.strip():
-            wav_bytes = process_tts(text_area, voice_choice, speed_value=selected_speed)
-            if wav_bytes:
+            mp3_bytes = process_tts(text_area, voice_choice, speed_value=selected_speed)
+            if mp3_bytes:
                 st.divider()
-                st.audio(wav_bytes, format="audio/wav")
-                st.download_button("📥 Download Audio", wav_bytes, file_name=file_name, mime="audio/wav", use_container_width=True)
+                st.audio(mp3_bytes, format="audio/mp3")
+                st.download_button("📥 Download MP3", mp3_bytes, file_name=file_name, mime="audio/mpeg", use_container_width=True)
         else:
             st.warning("Silakan masukkan teks terlebih dahulu.")
 
