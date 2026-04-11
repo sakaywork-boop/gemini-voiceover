@@ -1,7 +1,6 @@
 import streamlit as st
 import time
 import io
-import wave
 import array
 from google import genai
 from google.genai import types
@@ -44,11 +43,9 @@ def process_tts(text, voice_name, speed_value):
     KEYS = get_keys()
     status_placeholder = st.empty()
     progress_bar = st.progress(0)
-
     if not KEYS:
         st.error("🚨 API Key tidak ditemukan!")
         return None
-
     for i, key in enumerate(KEYS):
         try:
             status_placeholder.info(f"🔄 Menggunakan API Key #{i+1}...")
@@ -88,13 +85,6 @@ def process_tts(text, voice_name, speed_value):
                 break
     return None
 
-def merge_mp3_files(uploaded_files):
-    """Gabungkan beberapa file MP3 menjadi satu"""
-    combined = b""
-    for f in uploaded_files:
-        combined += f.read()
-    return combined
-
 # --- UI ---
 st.set_page_config(page_title="Gemini TTS Simple", page_icon="🎙️", layout="wide")
 st.title("🎙️ Gemini Voiceover Dashboard")
@@ -106,7 +96,6 @@ tab1, tab2 = st.tabs(["🎙️ Generate Voiceover", "🔗 Merge MP3"])
 # =====================
 with tab1:
     col1, col2 = st.columns([1, 3], gap="large")
-
     with col1:
         st.subheader("⚙️ Pengaturan")
         voice_choice = st.selectbox("Pilih Karakter Suara", ["Puck", "Charon", "Kore", "Fenrir"])
@@ -114,7 +103,6 @@ with tab1:
         speed_map = {"Pelan (Santai)": 0.85, "Normal": 1.0, "Cepat": 1.15}
         selected_speed = speed_map[speed_label]
         file_name = st.text_input("Nama File Output", "hasil_suara.mp3")
-
     with col2:
         st.subheader("📝 Konten Teks")
         text_area = st.text_area("Masukkan teks narasi:", height=300, placeholder="Tempel naskah di sini...")
@@ -133,37 +121,48 @@ with tab1:
 # =====================
 with tab2:
     st.subheader("🔗 Gabungkan File MP3")
-    st.caption("Upload beberapa file MP3, susun urutannya, lalu download jadi satu file.")
+    st.caption("Upload beberapa file MP3, cek urutannya, lalu klik Merge.")
 
     uploaded = st.file_uploader(
-        "Upload file MP3 (bisa lebih dari satu)",
+        "Upload file MP3 (pilih semua sekaligus)",
         type=["mp3"],
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        key="merge_uploader"
     )
 
-    if uploaded:
-        st.info(f"✅ {len(uploaded)} file terupload")
-        st.subheader("📋 Urutan File:")
+    # Selalu tampilkan daftar file begitu ada upload
+    if uploaded is not None and len(uploaded) > 0:
+        st.success(f"✅ {len(uploaded)} file berhasil diupload!")
+        st.divider()
+        st.subheader("📋 Urutan Penggabungan:")
+
         for i, f in enumerate(uploaded):
-            st.write(f"**{i+1}.** {f.name}")
+            size_kb = len(f.getvalue()) / 1024
+            st.write(f"**{i+1}.** `{f.name}` — {size_kb:.1f} KB")
 
-        merge_name = st.text_input("Nama file hasil gabungan", "gabungan_voiceover.mp3")
+        st.divider()
+        merge_name = st.text_input("💾 Nama file hasil gabungan:", value="gabungan_voiceover.mp3", key="merge_name")
 
-        if st.button("🔗 Gabungkan Sekarang", use_container_width=True):
-            with st.spinner("Menggabungkan..."):
-                merged = merge_mp3_files(uploaded)
-                buf = io.BytesIO(merged)
-            st.success(f"✨ {len(uploaded)} file berhasil digabungkan!")
-            st.audio(buf, format="audio/mpeg")
+        if st.button("🔗 Merge Semua MP3", use_container_width=True, type="primary"):
+            with st.spinner(f"Menggabungkan {len(uploaded)} file..."):
+                combined = b""
+                for f in uploaded:
+                    f.seek(0)
+                    combined += f.read()
+                result_buf = io.BytesIO(combined)
+
+            st.success(f"✨ Berhasil! {len(uploaded)} file digabungkan menjadi 1.")
+            st.audio(result_buf, format="audio/mpeg")
             st.download_button(
-                "📥 Download Hasil Gabungan",
-                data=io.BytesIO(merged),
+                label=f"📥 Download {merge_name}",
+                data=io.BytesIO(combined),
                 file_name=merge_name,
                 mime="audio/mpeg",
-                use_container_width=True
+                use_container_width=True,
+                type="primary"
             )
     else:
-        st.info("👆 Upload minimal 2 file MP3 untuk digabungkan.")
+        st.info("👆 Upload minimal 2 file MP3 di atas untuk mulai menggabungkan.")
 
 st.markdown("---")
 st.caption("Deployed via Streamlit Community Cloud")
