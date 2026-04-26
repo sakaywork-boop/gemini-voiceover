@@ -47,9 +47,17 @@ def split_scenes(text, gemini_api_key):
     )
 
     raw = response.text.strip()
+
+    # Bersihkan markdown backtick
     raw = re.sub(r'```json|```', '', raw).strip()
 
-    scenes = json.loads(raw)
+    # Ekstrak hanya bagian [ ... ] array JSON
+    match = re.search(r'\[.*\]', raw, re.DOTALL)
+    if not match:
+        raise ValueError(f"Gemini tidak return JSON array valid. Response: {raw[:200]}")
+
+    clean_json = match.group(0).strip()
+    scenes = json.loads(clean_json)
     return scenes
 
 
@@ -87,7 +95,6 @@ def search_pexels(query, api_key, per_page=5):
 
     results = []
     for video in data.get("videos", []):
-        # Ambil file HD terbaik
         files = sorted(video.get("video_files", []),
                        key=lambda x: x.get("width", 0), reverse=True)
         download_url = files[0]["link"] if files else None
@@ -107,6 +114,108 @@ def search_pexels(query, api_key, per_page=5):
             "height": video.get("height", 0),
             "relevance_score": 0.0
         })
+    return results
+
+
+# ─────────────────────────────────────────────
+# PIXABAY SEARCH
+# ─────────────────────────────────────────────
+def search_pixabay(query, api_key, per_page=5):
+    """Cari video di Pixabay. Return list of clip dict."""
+    url = "https://pixabay.com/api/videos/"
+    params = {
+        "key": api_key,
+        "q": query,
+        "per_page": per_page,
+        "video_type": "film"
+    }
+
+    resp = requests.get(url, params=params, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+
+    results = []
+    for hit in data.get("hits", []):
+        videos = hit.get("videos", {})
+        medium = videos.get("medium") or videos.get("small") or videos.get("tiny") or {}
+        download_url = medium.get("url", "")
+        thumbnail = medium.get("thumbnail", "")
+        tags_str = hit.get("tags", "")
+
+        results.append({
+            "source": "Pixabay",
+            "id": hit.get("id"),
+            "thumbnail": thumbnail,
+            "download_url": download_url,
+            "title": tags_str,
+            "tags": tags_str,
+            "description": "",
+            "duration": hit.get("duration", 0),
+            "width": medium.get("width", 0),
+            "height": medium.get("height", 0),
+            "relevance_score": 0.0
+        })
+    return results
+
+
+# ─────────────────────────────────────────────
+# FIND BEST VISUAL (dengan fallback + scoring)
+# ─────────────────────────────────────────────
+def find_best_visual(visual_query, pexels_key, pixabay_key, threshold=0.25):
+    """
+    Cari visual terbaik untuk 1 scene.
+    Flow:
+      1. Search Pexels → score semua hasil
+      2. Kalau ada yang >= threshold → pakai
+      3. Kalau tidak → fallback Pixabay → score
+      4. Return clip dengan score tertinggi dari semua kandidat
+    """
+    all_candidates = []
+    log = []
+
+    # --- Step 1: Pexels ---
+    try:
+        pexels_results = search_pexels(visual_query, pexels_key)
+        for clip in pexels_results:
+            clip["relevance_score"] = score_relevance(
+                visual_query, clip["title"], clip["tags"], clip["description"]
+            )
+            all_candidates.append(clip)
+        log.append(f"Pexels: {len(pexels_results)} hasil ditemukan")
+    except Exception as e:
+        log.append(f"Pexels gagal: {str(e)[:60]}")
+
+    # --- Step 2: Cek apakah Pexels sudah cukup ---
+    pexels_best = max(
+        [c for c in all_candidates if c["source"] == "Pexels"],
+        key=lambda x: x["relevance_score"],
+        default=None
+    )
+
+    if pexels_best and pexels_best["relevance_score"] >= threshold:
+        log.append(f"✅ Pexels lolos threshold (score: {pexels_best['relevance_score']})")
+        return pexels_best, log
+
+    # --- Step 3: Fallback Pixabay ---
+    log.append(f"Pexels kurang relevan → fallback ke Pixabay")
+    try:
+        pixabay_results = search_pixabay(visual_query, pixabay_key)
+        for clip in pixabay_results:
+            clip["relevance_score"] = score_relevance(
+                visual_query, clip["title"], clip["tags"], clip["description"]
+            )
+            all_candidates.append(clip)
+        log.append(f"Pixabay: {len(pixabay_results)} hasil ditemukan")
+    except Exception as e:
+        log.append(f"Pixabay gagal: {str(e)[:60]}")
+
+    # --- Step 4: Ambil terbaik dari semua ---
+    if all_candidates:
+        best = max(all_candidates, key=lambda x: x["relevance_score"])
+        log.append(f"✅ Best dari semua source: {best['source']} (score: {best['relevance_score']})")
+        return best, log
+
+    return None, log        })
     return results
 
 
